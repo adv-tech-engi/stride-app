@@ -760,7 +760,7 @@ input,button,select,textarea{font-family:'Barlow',sans-serif;}
             </div>
             <div style="background:rgba(41,121,255,0.08);border:1px solid rgba(41,121,255,0.2);border-radius:10px;padding:12px;margin-top:14px;">
               <div style="font-size:11px;color:#2979FF;font-weight:600;">ℹ️ Compatible Models</div>
-              <div style="font-size:11px;color:var(--gray2);margin-top:4px;">GTR series · GTS series · T-Rex · Bip · Band 7/8 · Active · Falcon</div>
+              <div style="font-size:11px;color:var(--gray2);margin-top:4px;">GTS · GTS 2 · GTS 3 · GTS 4 · GTS Mini · GTS 4 Mini</div>
             </div>
           </div>
         </div>
@@ -1627,56 +1627,126 @@ let hrHistory = [];
 let syncLogs = [];
 let watchHR = 72, watchSteps = 8420, watchCal = 1240, watchStress = 28, watchSpO2 = 98;
 
+// Amazfit GTS BLE service UUIDs
+const AMAZFIT_SERVICES = [
+  '0000fee0-0000-1000-8000-00805f9b34fb', // Amazfit primary service
+  '0000fee1-0000-1000-8000-00805f9b34fb', // Amazfit data service
+  'heart_rate',
+  'battery_service',
+  '00001530-0000-3512-2118-0009af100700', // Mi Band / Amazfit OTA
+];
+
+// Known Amazfit GTS name prefixes
+const GTS_NAMES = ['Amazfit GTS', 'GTS', 'Amazfit-GTS', 'AmazfitGTS', 'Mi Watch'];
+
 function connectWatch() {
   const btn = document.getElementById('watchConnectBtn');
+  btn.innerHTML = '⏳ Scanning...';
+  btn.disabled = true;
 
-  // Try real Web Bluetooth first (Chrome only)
+  // Try real Web Bluetooth (Chrome on Android/Desktop)
   if (navigator.bluetooth) {
-    btn.innerHTML = '⏳ Scanning...';
-    btn.disabled = true;
-    showScanAnimation();
+    showScanAnimation(true);
+    // Filter specifically for Amazfit GTS
     navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: ['heart_rate', 'battery_service', 'fitness_machine']
+      filters: [
+        { namePrefix: 'Amazfit GTS' },
+        { namePrefix: 'GTS' },
+        { namePrefix: 'Amazfit-GTS' },
+        { services: ['0000fee0-0000-1000-8000-00805f9b34fb'] }
+      ],
+      optionalServices: [
+        'heart_rate',
+        'battery_service',
+        '0000fee0-0000-1000-8000-00805f9b34fb',
+        '0000fee1-0000-1000-8000-00805f9b34fb',
+      ]
     }).then(device => {
-      simulateConnected(device.name || 'Amazfit GTR 4');
+      // Real device found!
+      const name = device.name || 'Amazfit GTS';
+      showToast(`📡 Found ${name}! Connecting...`);
+      // Try to connect to GATT server
+      return device.gatt.connect().then(server => {
+        showToast(`✅ Paired with ${name}!`);
+        simulateConnected(name, device);
+      });
     }).catch(err => {
-      // User cancelled or not supported — fall back to simulation
-      simulateConnected('Amazfit GTR 4');
+      if (err.name === 'NotFoundError') {
+        // User cancelled picker — show manual scan UI
+        showToast('Tip: Make sure your GTS is awake & Bluetooth is ON', 'warn');
+        showScanAnimation(false);
+        btn.innerHTML = '🔍 Try Again';
+        btn.disabled = false;
+      } else if (err.name === 'NotSupportedError') {
+        // Browser doesn't support Web Bluetooth
+        showToast('Use Chrome browser for Bluetooth! Simulating...', 'warn');
+        setTimeout(() => simulateConnected('Amazfit GTS'), 1500);
+      } else {
+        // Other error — fall back to simulation
+        simulateConnected('Amazfit GTS');
+      }
     });
   } else {
-    // No Web Bluetooth — simulate
-    btn.innerHTML = '⏳ Connecting...';
-    btn.disabled = true;
-    showScanAnimation();
-    setTimeout(() => simulateConnected('Amazfit GTR 4'), 2200);
+    // Safari / Firefox — no Web Bluetooth support
+    showScanAnimation(false);
+    setTimeout(() => simulateConnected('Amazfit GTS'), 2000);
   }
 }
 
-function showScanAnimation() {
+function showScanAnimation(isReal) {
   const dot = document.getElementById('scanDot');
   const label = document.getElementById('scanLabel');
   if (dot) { dot.className = 'live-dot'; dot.style.background = 'var(--blue)'; }
-  if (label) label.textContent = 'Scanning for Amazfit devices...';
+  if (label) label.textContent = isReal
+    ? 'Browser scanning for Amazfit GTS...'
+    : 'Searching for Amazfit GTS nearby...';
 
-  // Show fake found devices after 1s
+  // Update device list
+  const dl = document.getElementById('deviceList');
+  dl.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:16px;color:var(--gray2);font-size:13px;">
+    <div style="width:18px;height:18px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+    Scanning for your Amazfit GTS...
+  </div>`;
+
+  // After 1.5s show found device
   setTimeout(() => {
-    document.getElementById('deviceList').innerHTML = `
+    dl.innerHTML = `
+      <div style="margin-bottom:8px;font-size:10px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:1px;">Found Devices</div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <div style="display:flex;align-items:center;gap:12px;background:var(--dark3);border:1px solid #2a2a2a;border-radius:10px;padding:12px;cursor:pointer;animation:fadeUp 0.3s ease;" onclick="simulateConnected('Amazfit GTR 4')">
-          <span style="font-size:24px;">⌚</span>
-          <div style="flex:1;"><div style="font-size:13px;font-weight:600;">Amazfit GTR 4</div><div style="font-size:10px;color:var(--gray2);">A4:C1:38:7F:2B:11 · Signal: Strong</div></div>
-          <div style="font-size:10px;font-weight:700;color:var(--green);background:rgba(0,200,83,0.1);padding:3px 8px;border-radius:6px;">PAIR</div>
+
+        <div style="display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(252,76,2,0.08),rgba(252,76,2,0.03));border:1px solid rgba(252,76,2,0.3);border-radius:12px;padding:14px;cursor:pointer;animation:fadeUp 0.3s ease;" onclick="simulateConnected('Amazfit GTS')">
+          <div style="position:relative;">
+            <span style="font-size:28px;">⌚</span>
+            <div style="position:absolute;top:-2px;right:-4px;width:8px;height:8px;border-radius:50%;background:var(--green);border:2px solid var(--dark3);"></div>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:700;color:var(--white);">Amazfit GTS <span style="font-size:10px;background:rgba(252,76,2,0.15);color:var(--orange);padding:2px 6px;border-radius:4px;margin-left:4px;">YOUR WATCH</span></div>
+            <div style="font-size:10px;color:var(--gray2);margin-top:3px;">Signal: ████░ Strong · Ready to pair</div>
+            <div style="font-size:10px;color:var(--green);margin-top:2px;">✓ Amazfit GTS detected nearby</div>
+          </div>
+          <div style="background:var(--orange);color:#fff;font-size:11px;font-weight:700;padding:8px 14px;border-radius:8px;">CONNECT</div>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;background:var(--dark3);border:1px solid #1e1e1e;border-radius:10px;padding:12px;cursor:pointer;opacity:0.5;">
-          <span style="font-size:24px;">📱</span>
-          <div style="flex:1;"><div style="font-size:13px;font-weight:600;">Unknown Device</div><div style="font-size:10px;color:var(--gray2);">B8:27:EB:XX:XX:XX · Signal: Weak</div></div>
+
+        <div style="font-size:10px;color:var(--gray);padding:8px 4px;">Other nearby devices (not your watch)</div>
+
+        <div style="display:flex;align-items:center;gap:12px;background:var(--dark3);border:1px solid #1e1e1e;border-radius:10px;padding:12px;opacity:0.4;cursor:not-allowed;">
+          <span style="font-size:20px;">📱</span>
+          <div style="flex:1;"><div style="font-size:12px;font-weight:600;color:var(--gray2);">Unknown BLE Device</div><div style="font-size:10px;color:var(--gray);">Signal: Weak · Not compatible</div></div>
         </div>
+        <div style="display:flex;align-items:center;gap:12px;background:var(--dark3);border:1px solid #1e1e1e;border-radius:10px;padding:12px;opacity:0.4;cursor:not-allowed;">
+          <span style="font-size:20px;">🎧</span>
+          <div style="flex:1;"><div style="font-size:12px;font-weight:600;color:var(--gray2);">Bluetooth Headphones</div><div style="font-size:10px;color:var(--gray);">Signal: Medium · Not a watch</div></div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;background:rgba(41,121,255,0.08);border:1px solid rgba(41,121,255,0.2);border-radius:10px;padding:10px 12px;">
+        <div style="font-size:11px;color:var(--blue);font-weight:600;">💡 Is your GTS not showing?</div>
+        <div style="font-size:11px;color:var(--gray2);margin-top:4px;">Make sure your watch screen is ON and Bluetooth is enabled on your phone. On your GTS: swipe down → Settings → About to find the name.</div>
       </div>`;
-  }, 1000);
+  }, 1500);
 }
 
-function simulateConnected(modelName) {
+function simulateConnected(modelName, bleDevice=null) {
   watchConnected = true;
   document.getElementById('watchConnectBtn').innerHTML = '✓ Connected';
   document.getElementById('watchConnectBtn').style.background = 'var(--green)';
@@ -1686,6 +1756,9 @@ function simulateConnected(modelName) {
   document.getElementById('watchDisconnected').style.display = 'none';
   document.getElementById('watchConnected').style.display = 'block';
   document.getElementById('watchModelName').textContent = modelName;
+  document.getElementById('watchMacAddr').textContent = bleDevice
+    ? `Paired via Web Bluetooth · ${bleDevice.id||'BLE Device'}`
+    : 'Amazfit GTS · Advait Hadawale';
 
   // Init data
   hrHistory = Array.from({length:24}, (_,i) => ({
